@@ -1,0 +1,571 @@
+---
+title: "HW 4.3"
+author: "Seokyoung Kim"
+date: "04/13/2026"
+format:
+  pdf:
+    toc: true
+    toc-depth: 2
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(tidyverse)
+library(rvest)
+library(janitor)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+```
+
+## 1. Busiest Airports Analysis
+
+This section examines passenger traffic trends at six major international airports from 2020 to 2025. Data was scraped from Wikipedia's list of busiest airports by passenger traffic. The six airports selected for analysis are Hartsfield–Jackson Atlanta International Airport, Frankfurt Airport, Beijing Daxing International Airport, Dubai International Airport, Tokyo Haneda Airport, and Dallas Fort Worth International Airport.
+
+### Passenger Traffic Table
+
+The table below summarizes annual passenger counts for each of the six airports across the six-year period.
+
+```{r}
+#| label: airports-data
+#| echo: false
+
+url <- "https://en.wikipedia.org/wiki/List_of_busiest_airports_by_passenger_traffic"
+tables <- url %>% read_html() %>% html_table(fill = TRUE)
+years <- 2025:2020
+year_tables <- setNames(tables[2:7], years)
+
+selected_airports <- c(
+  "Hartsfield–Jackson Atlanta International Airport",
+  "Frankfurt Airport",
+  "Beijing Daxing International Airport",
+  "Dubai International Airport",
+  "Tokyo Haneda Airport",
+  "Dallas Fort Worth International Airport"
+)
+
+clean_numbers <- function(x) {
+  x %>%
+    gsub("\\[.*?\\]", "", .) %>%
+    gsub(",", "", .) %>%
+    as.numeric()
+}
+
+filtered_tables <- map(
+  year_tables, ~ .x %>% filter(Airport %in% selected_airports)
+)
+
+cleaned_tables <- map(filtered_tables, ~ {
+  tbl <- .x %>% clean_names()
+  passenger_col <- names(tbl)[str_detect(names(tbl), "passenger")]
+  tbl %>%
+    mutate(
+      passengers = clean_numbers(.data[[passenger_col]])
+    ) %>%
+    select(airport, passengers)
+})
+
+cleaned_tables_with_year <- imap(cleaned_tables, ~ .x %>% mutate(year = as.integer(.y)))
+airports_tidy <- bind_rows(cleaned_tables_with_year)
+```
+
+```{r}
+#| label: airports-table
+#| echo: false
+
+table_data <- airports_tidy %>%
+  select(airport, year, passengers)
+
+table_data %>%
+  kable(
+    caption = "Passenger Traffic for Six International Airports (2020–2025)",
+    col.names = c("Airport", "Year", "Passengers"),
+    booktabs = TRUE
+  )
+```
+
+### Passenger Traffic Visualization
+
+The line graph below shows the change in passenger traffic over time for each airport.
+
+```{r}
+#| label: airports-plot
+#| echo: false
+#| fig-cap: "Passenger traffic trends for six international airports from 2020 to 2025."
+#| fig-width: 10
+#| fig-height: 6
+
+ggplot(airports_tidy, aes(x = year, y = passengers, color = airport, group = airport)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = 2020:2025) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Passenger Traffic Trends for Six International Airports (2020–2025)",
+    x = "Year",
+    y = "Total Passengers",
+    color = "Airport"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+### Analysis
+
+The data shows a clear and consistent recovery in global air travel from the decline caused by the COVID-19 pandemic in 2020. Hartsfield–Jackson Atlanta and Dallas Fort Worth, both major domestic U.S. hubs, demonstrated the fastest rebounds and reached pre-pandemic levels by 2023–2024. Dubai International Airport showed steady growth throughout the period. Frankfurt Airport and Tokyo Haneda showed slower recoveries, likely reflecting the more cautious reopening policies in Europe and Japan. Beijing Daxing Airport, being a newer facility, shows relatively modest but growing numbers throughout the period.
+
+## 2. Monte Carlo Numerical Integration
+
+This section demonstrates the Monte Carlo approach to numerical integration. The goal is to estimate the area under the Beta(2, 2) probability density function over the interval \[0, 1\]. The Monte Carlo method works by randomly generating points within a bounding rectangle and calculating the proportion that fall below the curve.
+
+### Method
+
+The Beta(2, 2) density function is symmetric on the interval \[0, 1\]. For this analysis:
+
+-   **x** values are drawn uniformly from \[0, 1\]
+-   **y** values are drawn uniformly from \[0, 1.5\]
+-   Points are flagged as "on or below" the curve if their y-value is less than or equal to the density at their x-value
+-   The integral estimate is equal to the proportion of points below the curve × bounding rectangle area
+
+```{r}
+#| label: monte-carlo-setup
+#| echo: false
+
+set.seed(42)
+
+mc_sample <- function(n, x_min, x_max, y_min, y_max) {
+  tibble(
+    x = runif(n, min = x_min, max = x_max),
+    y = runif(n, min = y_min, max = y_max)
+  )
+}
+
+df <- mc_sample(1000, 0, 1, 0, 1.5)
+
+df_flagged <- df %>%
+  mutate(
+    fx = dbeta(x, shape1 = 2, shape2 = 2),
+    flag = if_else(y <= fx, "on_below", "above")
+  )
+
+area <- (1 - 0) * (1.5 - 0)
+p_hat <- mean(df_flagged$flag == "on_below")
+estimate <- p_hat * area
+```
+
+### Visualization
+
+The plot below shows the 1,000 randomly sampled points. Points in green fall on or below the Beta(2, 2) curve, while red points scatters above it. The black curve represents the true Beta(2, 2) density function.
+
+```{r}
+#| label: monte-carlo-plot
+#| echo: false
+#| fig-cap: "Monte Carlo integration of the Beta(2,2) density function. Green points are below the curve; red points are above."
+#| fig-width: 8
+#| fig-height: 5
+
+ggplot(df_flagged, aes(x = x, y = y, color = flag)) +
+  geom_point(alpha = 0.6, size = 1.2) +
+  stat_function(
+    fun = dbeta,
+    args = list(shape1 = 2, shape2 = 2),
+    xlim = c(0, 1),
+    color = "black",
+    linewidth = 1.2
+  ) +
+  scale_color_manual(
+    values = c("above" = "red", "on_below" = "darkgreen"),
+    labels = c("Above curve", "On or below curve")
+  ) +
+  labs(
+    title = "Monte Carlo Numerical Integration: Beta(2, 2) Density",
+    x = "x",
+    y = "y",
+    color = "Point classification"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+### Results
+
+Using n = 1,000 random samples, the Monte Carlo estimate for the integral of the Beta(2, 2) density over \[0, 1\] is **`r round(estimate, 4)`**. The true value of this integral is exactly 1.0 (since it is a proper probability density). The closeness of our estimate to 1.0 shows the precision of the approach. With more samples, the estimate would converge more reliably.
+
+## 3. Planning and Prompting GenAI Tools
+
+### Data Context
+
+The dataset for this section comes from a longitudinal study that followed 31 women over four years. At the start of the study, researchers measured ulnar calcium levels for each participant. Fifteen women received no special intervention while the remaining 16 followed a structured diet and exercise program. Calcium levels were recorded at baseline and at the end of each of the following three years. The data file `calcium.csv` contains eight columns — four for each group — representing measurements at Initial, Year 1, Year 2, and Year 3. The two groups share the same column names (`y0`, `y1`, `y2`, `y3`), so the file requires careful tidying before analysis.
+
+### My Plan
+
+1. **Data tidying**: The data set has duplicate column names (both groups use `y0`–`y3`). Separate two groups by column position and bind them into a single data frame. Handle the one NA row in the diet/exercise group.
+2. **Data wrangling**: Compute the mean calcium level per group per time point.
+3. **Visualization**: Create a line plot with time point on the x-axis, mean calcium on the y-axis, and separate colored lines for each group.
+
+### Plan-Based Prompt and GenAI Response
+
+**Prompt:**
+
+"I have a CSV file called calcium.csv from a longitudinal study of 31 women. The file has 8 columns all named y0, y1, y2, y3 — the first four columns are the null treatment group (15 women) and the second four are the diet/exercise group (16 women). The last row of the null group columns is empty since there are only 15 women in that group. First, Read in both groups separately by column position, add a treatment label, and row-bind them. Second, compute the mean calcium level per group per time point. Lastly, create a line plot of mean calcium over time with separate colored lines per treatment group. Provide detailed explanation for each step."
+
+**Response:**
+
+> Here is the R code to accomplish your plan:
+>
+> ```r
+> library(tidyverse)
+>
+> # Read raw data (no header fix yet)
+> raw <- read_csv("calcium.csv", col_names = FALSE, skip = 1)
+>
+> # Split into two groups by column position
+> null_group <- raw %>%
+>   select(1:4) %>%
+>   set_names(c("y0", "y1", "y2", "y3")) %>%
+>   drop_na() %>%                         # removes the empty 16th row
+>   mutate(id = row_number(), treatment = "Null")
+>
+> diet_group <- raw %>%
+>   select(5:8) %>%
+>   set_names(c("y0", "y1", "y2", "y3")) %>%
+>   mutate(id = row_number(), treatment = "Diet/Exercise")
+>
+> # Row-bind and pivot to long format
+> calcium_long <- bind_rows(null_group, diet_group) %>%
+>   pivot_longer(cols = y0:y3,
+>                names_to  = "time",
+>                values_to = "calcium") %>%
+>   mutate(time = recode(time,
+>                        y0 = "Initial", y1 = "Year 1",
+>                        y2 = "Year 2",  y3 = "Year 3"),
+>          time = factor(time,
+>                        levels = c("Initial", "Year 1", "Year 2", "Year 3")))
+>
+> # Mean calcium per group per time point
+> calcium_summary <- calcium_long %>%
+>   group_by(treatment, time) %>%
+>   summarise(mean_calcium = mean(calcium, na.rm = TRUE), .groups = "drop")
+>
+> # Line plot
+> ggplot(calcium_summary, aes(x = time, y = mean_calcium,
+>                             color = treatment, group = treatment)) +
+>   geom_line(linewidth = 1.2) +
+>   geom_point(size = 3) +
+>   labs(
+>     title = "Mean Ulnar Calcium Over Time by Treatment Group",
+>     x     = "Time Point",
+>     y     = "Mean Calcium Level",
+>     color = "Treatment"
+>   ) +
+>   theme_minimal(base_size = 13)
+> ```
+>
+> **Explanation:** Reading with `col_names = FALSE` and `skip = 1` avoids the duplicate-column-name problem entirely — we assign clean names manually. `drop_na()` on the null group removes the empty 16th row. After row-binding, `pivot_longer()` reshapes the four measurement columns into a single `calcium` column with a `time` identifier. `recode()` converts the `y0`–`y3` labels to human-readable time point names, and wrapping in `factor()` with explicit `levels` ensures the x-axis is ordered correctly. Finally, `group_by` + `summarise` computes the group means, and `ggplot` renders the line plot with `group = treatment` ensuring the lines connect across time points.
+
+```{r}
+#| label: calcium-plot
+#| echo: false
+#| fig-cap: "Mean ulnar calcium levels over four time points for each treatment group."
+#| fig-width: 8
+#| fig-height: 5
+
+raw <- read_csv("calcium.csv", col_names = FALSE, skip = 1, show_col_types = FALSE)
+
+null_group <- raw %>%
+  select(1:4) %>%
+  set_names(c("y0", "y1", "y2", "y3")) %>%
+  drop_na() %>%
+  mutate(id = row_number(), treatment = "Null")
+
+diet_group <- raw %>%
+  select(5:8) %>%
+  set_names(c("y0", "y1", "y2", "y3")) %>%
+  mutate(id = row_number(), treatment = "Diet/Exercise")
+
+calcium_long <- bind_rows(null_group, diet_group) %>%
+  pivot_longer(cols = y0:y3, names_to = "time", values_to = "calcium") %>%
+  mutate(
+    time = recode(time, y0 = "Initial", y1 = "Year 1", y2 = "Year 2", y3 = "Year 3"),
+    time = factor(time, levels = c("Initial", "Year 1", "Year 2", "Year 3"))
+  )
+
+calcium_summary <- calcium_long %>%
+  group_by(treatment, time) %>%
+  summarise(mean_calcium = mean(calcium, na.rm = TRUE), .groups = "drop")
+
+ggplot(calcium_summary, aes(x = time, y = mean_calcium,
+                            color = treatment, group = treatment)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  labs(
+    title = "Mean Ulnar Calcium Over Time by Treatment Group",
+    x     = "Time Point",
+    y     = "Mean Calcium Level",
+    color = "Treatment"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### Generic Prompt Response
+
+**Generic Prompt:** "Write R code to visualize the calcium.csv dataset."
+
+**Generic Response:**
+
+> ```r
+> library(tidyverse)
+>
+> calcium <- read_csv("calcium.csv")
+> calcium %>%
+>   pivot_longer(everything(), names_to = "time", values_to = "value") %>%
+>   ggplot(aes(x = time, y = value)) +
+>   geom_boxplot() +
+>   labs(title = "Calcium Measurements", x = "Time", y = "Value") +
+>   theme_minimal()
+> ```
+
+### Comparison and Contrast
+
+The plan-based prompt produced far more useful output than the generic prompt. Since I explained the detailed structure of the file, Claude quite well handled the  data set following my prompt.
+
+The generic prompt produced code that would either error out due to duplicate column names, or at best produce a box plot that mixes both groups together with no treatment distinction, making it analytically useless.
+
+## 4. Reflection
+
+I got a strong foundation in data analysis using R and the tidyverse system. I learned how to tidy, wrangle, visualize, and analyze data from repetitive works on various data sets (pirates, galton family, US Armed Forces, etc). Also, creating this document taught me why reproducible workflows matter. Every result, table, and plot here is generated directly from code, meaning anyone can re-run this document and obtain the same output. This is a standard I intend to maintain in future data work.
+
+## Appendix A: GenAI Usage
+
+### Tool Information
+
+-   **Tool used:** Claude by Anthropic
+-   **Version:** Claude Sonnet 4
+-   **Date of usage:** April 14, 2026
+
+### Prompts and Responses
+
+**Prompt 1 (Plan-Based Prompt):**
+
+"I have a CSV file called calcium.csv from a longitudinal study of 31 women. The file has 8 columns all named y0, y1, y2, y3 — the first four columns are the null treatment group (15 women) and the second four are the diet/exercise group (16 women). The last row of the null group columns is empty since there are only 15 women in that group. First, Read in both groups separately by column position, add a treatment label, and row-bind them. Second, compute the mean calcium level per group per time point. Lastly, create a line plot of mean calcium over time with separate colored lines per treatment group. Provide detailed explanation for each step."
+
+**Response 1:**
+
+> Here is the R code to accomplish your plan:
+>
+> ```r
+> library(tidyverse)
+>
+> # Read raw data (no header fix yet)
+> raw <- read_csv("calcium.csv", col_names = FALSE, skip = 1)
+>
+> # Split into two groups by column position
+> null_group <- raw %>%
+>   select(1:4) %>%
+>   set_names(c("y0", "y1", "y2", "y3")) %>%
+>   drop_na() %>%
+>   mutate(id = row_number(), treatment = "Null")
+>
+> diet_group <- raw %>%
+>   select(5:8) %>%
+>   set_names(c("y0", "y1", "y2", "y3")) %>%
+>   mutate(id = row_number(), treatment = "Diet/Exercise")
+>
+> # Row-bind and pivot to long format
+> calcium_long <- bind_rows(null_group, diet_group) %>%
+>   pivot_longer(cols = y0:y3, names_to = "time", values_to = "calcium") %>%
+>   mutate(time = recode(time,
+>                        y0 = "Initial", y1 = "Year 1",
+>                        y2 = "Year 2",  y3 = "Year 3"),
+>          time = factor(time,
+>                        levels = c("Initial", "Year 1", "Year 2", "Year 3")))
+>
+> # Mean calcium per group per time point
+> calcium_summary <- calcium_long %>%
+>   group_by(treatment, time) %>%
+>   summarise(mean_calcium = mean(calcium, na.rm = TRUE), .groups = "drop")
+>
+> # Line plot
+> ggplot(calcium_summary, aes(x = time, y = mean_calcium,
+>                             color = treatment, group = treatment)) +
+>   geom_line(linewidth = 1.2) +
+>   geom_point(size = 3) +
+>   labs(title = "Mean Ulnar Calcium Over Time by Treatment Group",
+>        x = "Time Point", y = "Mean Calcium Level", color = "Treatment") +
+>   theme_minimal(base_size = 13)
+> ```
+>
+> Reading with `col_names = FALSE` and `skip = 1` avoids the duplicate-column-name problem entirely — we assign clean names manually. `drop_na()` on the null group removes the empty 16th row. After row-binding, `pivot_longer()` reshapes the four measurement columns into a single `calcium` column with a `time` identifier. `recode()` converts the `y0`–`y3` labels to human-readable time point names, and wrapping in `factor()` with explicit `levels` ensures the x-axis is ordered correctly. Finally, `group_by` + `summarise` computes the group means, and `ggplot` renders the line plot with `group = treatment` ensuring lines connect across time points.
+
+**Prompt 2 (Generic Prompt):**
+
+"Write R code to visualize the calcium.csv dataset."
+
+**Response 2:**
+
+> ```r
+> library(tidyverse)
+>
+> calcium <- read_csv("calcium.csv")
+> calcium %>%
+>   pivot_longer(everything(), names_to = "time", values_to = "value") %>%
+>   ggplot(aes(x = time, y = value)) +
+>   geom_boxplot() +
+>   labs(title = "Calcium Measurements", x = "Time", y = "Value") +
+>   theme_minimal()
+> ```
+
+## Appendix B: Code Appendix
+
+```{r}
+#| label: code-appendix
+#| echo: true
+#| eval: false
+
+library(tidyverse)
+library(rvest)
+library(janitor)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+
+
+# Section 1: BUSIEST AIRPORT ANALYSIS
+
+
+url <- "https://en.wikipedia.org/wiki/List_of_busiest_airports_by_passenger_traffic"
+tables <- url %>% read_html() %>% html_table(fill = TRUE)
+
+# Assign years 2025 to 2020 to the relevant tables (indices 2–7)
+years <- 2025:2020
+year_tables <- setNames(tables[2:7], years)
+
+selected_airports <- c(
+  "Hartsfield–Jackson Atlanta International Airport",
+  "Frankfurt Airport",
+  "Beijing Daxing International Airport",
+  "Dubai International Airport",
+  "Tokyo Haneda Airport",
+  "Dallas Fort Worth International Airport"
+)
+
+clean_numbers <- function(x) {
+  x %>%
+    gsub("\\[.*?\\]", "", .) %>%   # remove [footnote] brackets
+    gsub(",", "", .) %>%           # remove thousand separators
+    as.numeric()
+}
+
+# Filter each year's table to only the selected airports
+filtered_tables <- map(
+  year_tables, ~ .x %>% filter(Airport %in% selected_airports)
+)
+
+# Clean column names and extract the passenger count column
+cleaned_tables <- map(filtered_tables, ~ {
+  tbl <- .x %>% clean_names()
+  passenger_col <- names(tbl)[str_detect(names(tbl), "passenger")]
+  tbl %>%
+    mutate(passengers = clean_numbers(.data[[passenger_col]])) %>%
+    select(airport, passengers)
+})
+
+# Add year column to each tibble using imap
+cleaned_tables_with_year <- imap(
+  cleaned_tables, ~ .x %>% mutate(year = as.integer(.y))
+)
+
+airports_tidy <- bind_rows(cleaned_tables_with_year)
+
+airports_tidy %>%
+  select(airport, year, passengers) %>%
+  kable(
+    caption = "Passenger Traffic for Six International Airports (2020–2025)",
+    col.names = c("Airport", "Year", "Passengers"),
+    format = "html",
+    format.args = list(big.mark = ",")
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+ggplot(airports_tidy, aes(x = year, y = passengers, color = airport, group = airport)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = 2020:2025) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Passenger Traffic Trends for Six International Airports (2020–2025)",
+    x = "Year",
+    y = "Total Passengers",
+    color = "Airport"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+
+# SECTION 2: MONTE CARLO NUMERICAL INTEGRATION
+
+
+set.seed(42)  # Set seed for reproducibility
+
+# Generate n random (x, y) points within a bounding rectangle
+mc_sample <- function(n, x_min, x_max, y_min, y_max) {
+  tibble(
+    x = runif(n, min = x_min, max = x_max),
+    y = runif(n, min = y_min, max = y_max)
+  )
+}
+
+df <- mc_sample(1000, 0, 1, 0, 1.5)
+
+# 'on_below' if y <= f(x), else 'above'
+df_flagged <- df %>%
+  mutate(
+    fx   = dbeta(x, shape1 = 2, shape2 = 2),  # density height at x
+    flag = if_else(y <= fx, "on_below", "above")
+  )
+
+area     <- (1 - 0) * (1.5 - 0)
+p_hat    <- mean(df_flagged$flag == "on_below")
+estimate <- p_hat * area
+
+ggplot(df_flagged, aes(x = x, y = y, color = flag)) +
+  geom_point(alpha = 0.6, size = 1.2) +
+  stat_function(
+    fun   = dbeta,
+    args  = list(shape1 = 2, shape2 = 2),
+    xlim  = c(0, 1),
+    color = "black",
+    linewidth = 1.2
+  ) +
+  scale_color_manual(
+    values = c("above" = "red", "on_below" = "darkgreen"),
+    labels = c("Above curve", "On or below curve")
+  ) +
+  labs(
+    title = "Monte Carlo Numerical Integration: Beta(2, 2) Density",
+    x     = "x",
+    y     = "y",
+    color = "Point classification"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title    = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
